@@ -1,7 +1,7 @@
 import os
 import streamlit as st
 
-import ingest  # reuse your existing ingest.main()
+import ingest  # reuse existing ingest.main()
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -14,7 +14,7 @@ from langchain_core.output_parsers import StrOutputParser
 DATA_DIR = "data"
 DB_DIR = "chroma_db"
 
-load_dotenv()  # for local dev; on Streamlit Cloud you'll use st.secrets
+load_dotenv()  # for local dev; on Streamlit Cloud use st.secrets
 
 st.set_page_config(page_title="RAG Deep Research", page_icon="💬")
 
@@ -39,11 +39,10 @@ button[kind="primary"] {
 """, unsafe_allow_html=True)
 
 st.title("RAG Deep Research 💬")
-st.caption("Upload documents, build an index, and ask deep questions about them.")
+st.caption("Upload documents, build an index, and ask questions about them.")
 
-# ─────────────────────────────────────────────────────────────────────────
+
 #  RAG chain helper
-# ─────────────────────────────────────────────────────────────────────────
 
 SYSTEM = """You are a precise research assistant.
 Use ONLY the provided context from the documents.
@@ -89,9 +88,8 @@ def build_chain():
     )
     return rag_chain
 
-# ─────────────────────────────────────────────────────────────────────────
-#  Section 1: Document uploader + indexing
-# ─────────────────────────────────────────────────────────────────────────
+#  Document uploader + indexing
+
 st.subheader("📄 Upload documents")
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -132,9 +130,9 @@ if index_btn:
 
 st.markdown("---")
 
-# ─────────────────────────────────────────────────────────────────────────
-#  Section 2: Chat interface
-# ─────────────────────────────────────────────────────────────────────────
+
+#  Chat interface
+
 st.subheader("💬 Chat with your documents")
 
 if "history" not in st.session_state:

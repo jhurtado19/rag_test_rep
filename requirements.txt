@@ -1,0 +1,10 @@
+streamlit
+langchain>=0.2
+langchain-community>=0.2
+langchain-openai>=0.2
+langchain-chroma>=0.1.1
+chromadb>=0.5
+pypdf
+tiktoken
+python-dotenv
+fastapi

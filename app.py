@@ -165,16 +165,16 @@ with col2:
 if clear_btn:
     st.session_state.history = []
 
-"""if ask_btn and user_q.strip():
-    st.session_state.history.append(("You", user_q))
-    try:
-        rag_chain = build_chain()  # build using latest index
-        answer = rag_chain.invoke(user_q)
-    except Exception as e:
-        answer = f"⚠️ Error running RAG chain: {e}"
+#if ask_btn and user_q.strip():
+   # st.session_state.history.append(("You", user_q))
+    #try:
+      #  rag_chain = build_chain()  # build using latest index
+     #   answer = rag_chain.invoke(user_q)
+    #except Exception as e:
+    #    answer = f"⚠️ Error running RAG chain: {e}"
 
-    st.session_state.history.append(("Bot", answer))
-"""
+   # st.session_state.history.append(("Bot", answer))
+#
 if ask_btn and user_q.strip():
     st.session_state.history.append(("You", user_q))
 

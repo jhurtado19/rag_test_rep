@@ -165,61 +165,17 @@ with col2:
 if clear_btn:
     st.session_state.history = []
 
-#if ask_btn and user_q.strip():
-   # st.session_state.history.append(("You", user_q))
-    #try:
-      #  rag_chain = build_chain()  # build using latest index
-     #   answer = rag_chain.invoke(user_q)
-    #except Exception as e:
-    #    answer = f"⚠️ Error running RAG chain: {e}"
-
-   # st.session_state.history.append(("Bot", answer))
-#
 if ask_btn and user_q.strip():
     st.session_state.history.append(("You", user_q))
-
-    start_time = time.time()
-    answer = ""
-
-    with mlflow.start_run(run_name=f"rag-query-{difficulty}"):
-        # ── Params: searchable info ──────────────────────────────
-        mlflow.log_params({
-            "difficulty": difficulty,
-            "model": "gpt-4o-mini",
-            "embedding_model": "text-embedding-3-large",
-            # short preview to keep the param table readable
-            "question_preview": user_q[:200],
-        })
-
-        try:
-            rag_chain = build_chain()  # uses latest index
-            answer = rag_chain.invoke(user_q)
-            latency = time.time() - start_time
-
-            # ── Metrics: numbers to compare ──────────────────────
-            mlflow.log_metric("latency_s", latency)
-            mlflow.log_metric("answer_len", len(answer))
-
-            # ── Artifacts: full text of interaction ─────────────
-            mlflow.log_text(user_q, "question.txt")
-            mlflow.log_text(answer, "answer.txt")
-
-            # Optional: combined JSON artifact
-            mlflow.log_dict(
-                {
-                    "question": user_q,
-                    "difficulty": difficulty,
-                    "answer": answer,
-                    "latency_s": latency,
-                },
-                "interaction.json",
-            )
-
-        except Exception as e:
-            answer = f"⚠️ Error running RAG chain: {e}"
-            mlflow.log_param("error", str(e))
+    try:
+        rag_chain = build_chain()  # build using latest index
+        answer = rag_chain.invoke(user_q)
+    except Exception as e:
+        answer = f"⚠️ Error running RAG chain: {e}"
 
     st.session_state.history.append(("Bot", answer))
+
+
 
 for who, msg in st.session_state.history:
     if who == "You":

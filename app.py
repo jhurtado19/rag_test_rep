@@ -181,14 +181,14 @@ if ask_btn and user_q.strip():
     start_time = time.time()
     answer = ""
 
-    # One MLflow run per question
     with mlflow.start_run(run_name=f"rag-query-{difficulty}"):
-        # Log high-level params
+        # ── Params: searchable info ──────────────────────────────
         mlflow.log_params({
             "difficulty": difficulty,
             "model": "gpt-4o-mini",
             "embedding_model": "text-embedding-3-large",
-            "question": user_q,
+            # short preview to keep the param table readable
+            "question_preview": user_q[:200],
         })
 
         try:
@@ -196,13 +196,27 @@ if ask_btn and user_q.strip():
             answer = rag_chain.invoke(user_q)
             latency = time.time() - start_time
 
-            # Log metrics
+            # ── Metrics: numbers to compare ──────────────────────
             mlflow.log_metric("latency_s", latency)
             mlflow.log_metric("answer_len", len(answer))
 
+            # ── Artifacts: full text of interaction ─────────────
+            mlflow.log_text(user_q, "question.txt")
+            mlflow.log_text(answer, "answer.txt")
+
+            # Optional: combined JSON artifact
+            mlflow.log_dict(
+                {
+                    "question": user_q,
+                    "difficulty": difficulty,
+                    "answer": answer,
+                    "latency_s": latency,
+                },
+                "interaction.json",
+            )
+
         except Exception as e:
             answer = f"⚠️ Error running RAG chain: {e}"
-            # Optional: log error as a param
             mlflow.log_param("error", str(e))
 
     st.session_state.history.append(("Bot", answer))

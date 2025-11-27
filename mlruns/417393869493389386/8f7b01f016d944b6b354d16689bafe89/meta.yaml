@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/jessevizcarra/Projects/rag_test_rep/mlruns/417393869493389386/8f7b01f016d944b6b354d16689bafe89/artifacts
+end_time: 1764212176175
+entry_point_name: ''
+experiment_id: '417393869493389386'
+lifecycle_stage: active
+run_id: 8f7b01f016d944b6b354d16689bafe89
+run_name: rag-query-easy
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1764212173142
+status: 3
+tags: []
+user_id: jessevizcarra

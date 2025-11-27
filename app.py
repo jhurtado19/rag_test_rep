@@ -1,7 +1,9 @@
 import os
 import streamlit as st
+import time
 
 import ingest  # reuse existing ingest.main()
+import mlflow
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -15,6 +17,7 @@ DATA_DIR = "data"
 DB_DIR = "chroma_db"
 
 load_dotenv()  # for local dev; on Streamlit Cloud use st.secrets
+mlflow.set_experiment("rag-deep-research")
 
 st.set_page_config(page_title="RAG Deep Research", page_icon="💬")
 
@@ -133,7 +136,17 @@ st.markdown("---")
 
 #  Chat interface
 
+
+
+
 st.subheader("💬 Chat with your documents")
+
+# New: difficulty level for this question
+difficulty = st.selectbox(
+    "Select difficulty of this question:",
+    ["easy", "medium", "hard"],
+    index=0,
+)
 
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -152,13 +165,45 @@ with col2:
 if clear_btn:
     st.session_state.history = []
 
-if ask_btn and user_q.strip():
+"""if ask_btn and user_q.strip():
     st.session_state.history.append(("You", user_q))
     try:
         rag_chain = build_chain()  # build using latest index
         answer = rag_chain.invoke(user_q)
     except Exception as e:
         answer = f"⚠️ Error running RAG chain: {e}"
+
+    st.session_state.history.append(("Bot", answer))
+"""
+if ask_btn and user_q.strip():
+    st.session_state.history.append(("You", user_q))
+
+    start_time = time.time()
+    answer = ""
+
+    # One MLflow run per question
+    with mlflow.start_run(run_name=f"rag-query-{difficulty}"):
+        # Log high-level params
+        mlflow.log_params({
+            "difficulty": difficulty,
+            "model": "gpt-4o-mini",
+            "embedding_model": "text-embedding-3-large",
+            "question": user_q,
+        })
+
+        try:
+            rag_chain = build_chain()  # uses latest index
+            answer = rag_chain.invoke(user_q)
+            latency = time.time() - start_time
+
+            # Log metrics
+            mlflow.log_metric("latency_s", latency)
+            mlflow.log_metric("answer_len", len(answer))
+
+        except Exception as e:
+            answer = f"⚠️ Error running RAG chain: {e}"
+            # Optional: log error as a param
+            mlflow.log_param("error", str(e))
 
     st.session_state.history.append(("Bot", answer))
 

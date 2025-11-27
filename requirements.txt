@@ -8,3 +8,4 @@ pypdf
 tiktoken
 python-dotenv
 fastapi
+mlflow

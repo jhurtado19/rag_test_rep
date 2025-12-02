@@ -1,8 +1,8 @@
 import os
-import streamlit as st
 import time
+import streamlit as st
 
-import ingest  # reuse existing ingest.main()
+import ingest
 import mlflow
 
 from dotenv import load_dotenv
@@ -12,54 +12,114 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-# ─── Config ──────────────────────────────────────────────────────────────
+
+# -----------------------------------------------------------------------------
+# Page Config
+# -----------------------------------------------------------------------------
+st.set_page_config(page_title="RAG Deep Research", page_icon="💬")
+
 DATA_DIR = "data"
 DB_DIR = "chroma_db"
-# ─── Config ──────────────────────────────────────────────────────────────
-DATA_DIR = "data"
-DB_DIR = "chroma_db"
 
-load_dotenv()  # harmless for local dev
+load_dotenv()  # used locally; Streamlit Cloud uses st.secrets
 
-# --- Databricks MLflow config via Streamlit secrets only ---
 
-# Required secrets
+# -----------------------------------------------------------------------------
+# Databricks + MLflow Config
+# -----------------------------------------------------------------------------
 DATABRICKS_HOST = st.secrets["DATABRICKS_HOST"]
 DATABRICKS_TOKEN = st.secrets["DATABRICKS_TOKEN"]
 
-# Tracking & experiment
 MLFLOW_TRACKING_URI = st.secrets.get("MLFLOW_TRACKING_URI", "databricks")
 MLFLOW_EXPERIMENT_NAME = st.secrets.get("MLFLOW_EXPERIMENT_NAME", "rag-deep-research")
 
-# Make sure Databricks plugin sees these
 os.environ["DATABRICKS_HOST"] = DATABRICKS_HOST
 os.environ["DATABRICKS_TOKEN"] = DATABRICKS_TOKEN
 
-# IMPORTANT: set tracking URI BEFORE experiment
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
 
-# Optional: debug in sidebar (no secrets)
-st.sidebar.markdown("### MLflow config (debug)")
-st.sidebar.write(f"Tracking URI: {mlflow.get_tracking_uri()}")
-st.sidebar.write(f"Experiment: {MLFLOW_EXPERIMENT_NAME}")
 
-# UI #
+# -----------------------------------------------------------------------------
+# Sidebar: Title, Difficulty, Document Upload/Browse, Settings
+# -----------------------------------------------------------------------------
+with st.sidebar:
+    st.title("RAG Deep Research 💬")
+    st.caption("Chat with your document-aware assistant.")
 
-st.set_page_config(page_title="RAG Deep Research", page_icon="💬")
+    st.markdown("### Question Settings")
+    difficulty = st.selectbox(
+        "Difficulty:",
+        ["Easy", "Medium", "Hard"],
+        index=0,
+    )
 
-# Custom styling: light blue background, white chat bar
+    st.markdown("---")
+    st.markdown("### Document Management")
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    # Upload documents
+    uploaded_files = st.file_uploader(
+        "Upload PDF or text files",
+        type=["pdf", "txt"],
+        accept_multiple_files=True,
+        key="sidebar_upload",
+    )
+
+    if st.button("Re-index documents", type="primary", key="sidebar_reindex"):
+        if not uploaded_files:
+            st.warning("Please upload at least one file before re-indexing.")
+        else:
+            with st.spinner("Uploading & rebuilding index..."):
+                for upl in uploaded_files:
+                    save_path = os.path.join(DATA_DIR, upl.name)
+                    with open(save_path, "wb") as f:
+                        f.write(upl.getbuffer())
+
+                try:
+                    ingest.main()
+                    st.cache_resource.clear()
+
+                    with mlflow.start_run(run_name="reindex", nested=True):
+                        mlflow.log_param("event_type", "reindex")
+                        mlflow.log_param("n_uploaded_files", len(uploaded_files))
+                        mlflow.log_param(
+                            "files",
+                            ", ".join([f.name for f in uploaded_files]),
+                        )
+
+                    st.success("Index rebuilt successfully!")
+                except Exception as e:
+                    st.error(f"Error during ingestion: {e}")
+
+    st.markdown("### Files in Index")
+    existing_files = os.listdir(DATA_DIR)
+    if existing_files:
+        st.write("Indexed files:")
+        for x in existing_files:
+            st.write("•", x)
+    else:
+        st.write("No documents indexed yet.")
+
+    st.markdown("---")
+    st.markdown("### Session Controls")
+    if st.button("Clear chat history"):
+        st.session_state.pop("messages", None)
+
+    st.markdown("---")
+    st.markdown("### MLflow Debug")
+    st.write("Tracking URI:", mlflow.get_tracking_uri())
+    st.write("Experiment:", MLFLOW_EXPERIMENT_NAME)
+
+
+# -----------------------------------------------------------------------------
+# Styling
+# -----------------------------------------------------------------------------
 st.markdown("""
 <style>
 [data-testid="stAppViewContainer"] {
     background: linear-gradient(135deg, #d6ecff 0%, #f0f9ff 100%);
-}
-
-/* White chat bar */
-div[data-baseweb="input"] > div {
-    background-color: #ffffff !important;
-    border-radius: 10px !important;
-    border: 1px solid #cccccc !important;
 }
 button[kind="primary"] {
     border-radius: 10px !important;
@@ -68,12 +128,10 @@ button[kind="primary"] {
 </style>
 """, unsafe_allow_html=True)
 
-st.title("RAG Deep Research 💬")
-st.caption("Upload documents, build an index, and ask questions about them.")
 
-
-#  RAG chain helper
-
+# -----------------------------------------------------------------------------
+# RAG Chain Helper
+# -----------------------------------------------------------------------------
 SYSTEM = """You are a precise research assistant.
 Use ONLY the provided context from the documents.
 If the context is insufficient, say you don't know.
@@ -85,29 +143,26 @@ prompt = ChatPromptTemplate.from_messages([
 ])
 
 def format_docs(docs):
-    lines = []
+    out = []
     for i, d in enumerate(docs):
-        src = d.metadata.get("source", "unknown").split("/")[-1]
-        lines.append(f"[{src} | doc:{i}] {d.page_content}")
-    return "\n\n".join(lines)
+        name = d.metadata.get("source", "unknown").split("/")[-1]
+        out.append(f"[{name} | doc:{i}] {d.page_content}")
+    return "\n\n".join(out)
 
 @st.cache_resource(show_spinner=False)
 def get_llm():
-    # On Streamlit Cloud, use st.secrets instead of os.getenv
-    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
-    # NOTE: keep model_name synced with what you log to MLflow below
+    api_key = os.getenv("OPENAI_API_KEY") or st.secrets["OPENAI_API_KEY"]
     return ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=api_key)
 
 def build_chain():
-    """Build a fresh RAG chain using the current Chroma DB."""
-    api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+    api_key = os.getenv("OPENAI_API_KEY") or st.secrets["OPENAI_API_KEY"]
     embeddings = OpenAIEmbeddings(model="text-embedding-3-large", api_key=api_key)
     vs = Chroma(persist_directory=DB_DIR, embedding_function=embeddings)
     retriever = vs.as_retriever(search_kwargs={"k": 4})
 
     llm = get_llm()
 
-    rag_chain = (
+    return (
         RunnableParallel({"docs": retriever, "question": RunnablePassthrough()})
         | {
             "context": lambda x: format_docs(x["docs"]),
@@ -117,125 +172,55 @@ def build_chain():
         | llm
         | StrOutputParser()
     )
-    return rag_chain
 
-#  Document uploader + indexing
 
-st.subheader("📄 Upload documents")
+# -----------------------------------------------------------------------------
+# Main Chat UI
+# -----------------------------------------------------------------------------
+st.subheader("Chat with your documents")
 
-os.makedirs(DATA_DIR, exist_ok=True)
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-uploaded_files = st.file_uploader(
-    "Upload PDF or text files to add to the knowledge base",
-    type=["pdf", "txt"],
-    accept_multiple_files=True,
+# Display history
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
+
+st.markdown(
+    "<div style='font-size: 0.85rem; color: #555;'>Ask a question below.</div>",
+    unsafe_allow_html=True,
 )
 
-if uploaded_files:
-    st.write(f"{len(uploaded_files)} file(s) selected.")
-    for f in uploaded_files:
-        st.write("•", f.name)
+# Sticky input
+user_q = st.chat_input("Type your question here...")
 
-index_btn = st.button("Upload & Re-index", type="primary")
+if user_q:
+    st.session_state.messages.append({"role": "user", "content": user_q})
+    with st.chat_message("user"):
+        st.markdown(user_q)
 
-if index_btn:
-    if not uploaded_files:
-        st.warning("Please select at least one file to upload before re-indexing.")
-    else:
-        with st.spinner("Uploading files and rebuilding index..."):
-            # Save uploaded files into ./data
-            for uploaded in uploaded_files:
-                save_path = os.path.join(DATA_DIR, uploaded.name)
-                with open(save_path, "wb") as out_f:
-                    out_f.write(uploaded.getbuffer())
-
-            # Run your ingestion pipeline to rebuild chroma_db
-            try:
-                ingest.main()
-                st.cache_resource.clear()  # clear cached LLM if needed
-
-                # Optional: log a re-index event to MLflow
-                try:
-                    with mlflow.start_run(run_name="reindex", nested=True):
-                        mlflow.log_param("event_type", "reindex")
-                        mlflow.log_param("n_uploaded_files", len(uploaded_files))
-                        mlflow.log_param(
-                            "uploaded_filenames",
-                            ", ".join([f.name for f in uploaded_files])
-                        )
-                except Exception:
-                    # Don't break the app if logging fails
-                    pass
-
-                st.success("✅ Files uploaded and index rebuilt successfully!")
-            except Exception as e:
-                st.error(f"❌ Error during ingestion: {e}")
-
-        st.info("You can now ask questions about the newly uploaded documents.")
-
-st.markdown("---")
-
-
-#  Chat interface
-
-st.subheader("💬 Chat with your documents")
-
-# New: difficulty level for this question
-difficulty = st.selectbox(
-    "Select difficulty of this question:",
-    ["easy", "medium", "hard"],
-    index=0,
-)
-
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-def clear_input():
-    st.session_state["user_input"] = ""
-
-user_q = st.text_input("Your question:", key="user_input")
-
-col1, col2 = st.columns([1, 5])
-with col1:
-    ask_btn = st.button("Ask", type="primary")
-with col2:
-    clear_btn = st.button("Clear chat", on_click=clear_input)
-
-if clear_btn:
-    st.session_state.history = []
-
-if ask_btn and user_q.strip():
-    st.session_state.history.append(("You", user_q))
-
-    # --- MLflow logging around the RAG call ---
-    start_time = time.time()
+    # RAG + MLflow
+    start = time.time()
     try:
-        rag_chain = build_chain()  # build using latest index
+        rag_chain = build_chain()
 
         with mlflow.start_run(run_name="chat-query"):
-            # Params
             mlflow.log_param("user_query", user_q)
             mlflow.log_param("difficulty", difficulty)
             mlflow.log_param("model_name", "gpt-4o-mini")
 
-            # Invoke RAG chain
             answer = rag_chain.invoke(user_q)
 
-            # Metrics
-            latency = time.time() - start_time
+            latency = time.time() - start
             mlflow.log_metric("latency_sec", latency)
 
-            # Artifact: answer text
             mlflow.log_text(str(answer), "artifacts/answer.txt")
 
     except Exception as e:
         answer = f"⚠️ Error running RAG chain: {e}"
 
-    st.session_state.history.append(("Bot", answer))
+    st.session_state.messages.append({"role": "assistant", "content": answer})
 
-for who, msg in st.session_state.history:
-    if who == "You":
-        st.markdown(f"**🧑 You:** {msg}")
-    else:
-        st.markdown(f"**🤖 Bot:** {msg}")
-        st.markdown("---")
+    with st.chat_message("assistant"):
+        st.markdown(answer)

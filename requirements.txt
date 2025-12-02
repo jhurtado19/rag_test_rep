@@ -9,3 +9,5 @@ tiktoken
 python-dotenv
 fastapi
 mlflow
+mlflow databricks-sdk
+

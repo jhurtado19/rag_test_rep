@@ -50,7 +50,7 @@ with st.sidebar:
     st.markdown("### Question Settings")
     difficulty = st.selectbox(
         "Difficulty:",
-        ["easy", "medium", "hard"],
+        ["Easy", "Medium", "Hard"],
         index=0,
     )
 

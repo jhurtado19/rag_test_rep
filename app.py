@@ -175,37 +175,39 @@ if index_btn:
 
 st.markdown("---")
 
-
-#  Chat interface
+#  Chat interface (modern chat UI)
 
 st.subheader("💬 Chat with your documents")
 
-# New: difficulty level for this question
-difficulty = st.selectbox(
-    "Select difficulty of this question:",
+# Move difficulty to sidebar so the main area feels more like a chat app
+difficulty = st.sidebar.selectbox(
+    "Question difficulty:",
     ["easy", "medium", "hard"],
     index=0,
 )
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+# Button to clear the whole conversation
+if st.sidebar.button("Clear chat"):
+    st.session_state.pop("messages", None)
 
-def clear_input():
-    st.session_state["user_input"] = ""
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-user_q = st.text_input("Your question:", key="user_input")
+# Render existing chat history
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-col1, col2 = st.columns([1, 5])
-with col1:
-    ask_btn = st.button("Ask", type="primary")
-with col2:
-    clear_btn = st.button("Clear chat", on_click=clear_input)
+# Sticky input bar at the bottom of the page
+user_q = st.chat_input("Ask something about your documents...")
 
-if clear_btn:
-    st.session_state.history = []
+if user_q:
+    # Show user message immediately
+    st.session_state.messages.append({"role": "user", "content": user_q})
 
-if ask_btn and user_q.strip():
-    st.session_state.history.append(("You", user_q))
+    with st.chat_message("user"):
+        st.markdown(user_q)
 
     # --- MLflow logging around the RAG call ---
     start_time = time.time()
@@ -231,11 +233,8 @@ if ask_btn and user_q.strip():
     except Exception as e:
         answer = f"⚠️ Error running RAG chain: {e}"
 
-    st.session_state.history.append(("Bot", answer))
+    # Add assistant message to history and display
+    st.session_state.messages.append({"role": "assistant", "content": answer})
 
-for who, msg in st.session_state.history:
-    if who == "You":
-        st.markdown(f"**🧑 You:** {msg}")
-    else:
-        st.markdown(f"**🤖 Bot:** {msg}")
-        st.markdown("---")
+    with st.chat_message("assistant"):
+        st.markdown(answer)

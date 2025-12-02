@@ -45,7 +45,7 @@ mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.title("RAG Deep Research 💬")
-    st.caption("Chat with your document-aware assistant.")
+    st.caption("Chat with your document-aware assistant. Test data can be downloaded from project repository, or upload your own.")
 
     st.markdown("### Question Settings")
     difficulty = st.selectbox(

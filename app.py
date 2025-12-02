@@ -15,29 +15,35 @@ from langchain_core.output_parsers import StrOutputParser
 # ─── Config ──────────────────────────────────────────────────────────────
 DATA_DIR = "data"
 DB_DIR = "chroma_db"
+# ─── Config ──────────────────────────────────────────────────────────────
+DATA_DIR = "data"
+DB_DIR = "chroma_db"
 
-
-load_dotenv()  # harmless; mostly for local dev if I ever use it
+load_dotenv()  # harmless for local dev
 
 # --- Databricks MLflow config via Streamlit secrets only ---
 
+# Required secrets
 DATABRICKS_HOST = st.secrets["DATABRICKS_HOST"]
 DATABRICKS_TOKEN = st.secrets["DATABRICKS_TOKEN"]
 
-MLFLOW_TRACKING_URI = st.secrets.get("MLFLOW_TRACKING_URI", DATABRICKS_HOST)
+# Tracking & experiment
+MLFLOW_TRACKING_URI = st.secrets.get("MLFLOW_TRACKING_URI", "databricks")
 MLFLOW_EXPERIMENT_NAME = st.secrets.get("MLFLOW_EXPERIMENT_NAME", "rag-deep-research")
 
-# Make sure the Databricks client + MLflow see these as env vars
+# Make sure Databricks plugin sees these
 os.environ["DATABRICKS_HOST"] = DATABRICKS_HOST
 os.environ["DATABRICKS_TOKEN"] = DATABRICKS_TOKEN
 
+# IMPORTANT: set tracking URI BEFORE experiment
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
 
-# Optional: debug in sidebar (safe, no tokens)
+# Optional: debug in sidebar (no secrets)
 st.sidebar.markdown("### MLflow config (debug)")
 st.sidebar.write(f"Tracking URI: {mlflow.get_tracking_uri()}")
 st.sidebar.write(f"Experiment: {MLFLOW_EXPERIMENT_NAME}")
+
 # UI #
 
 st.set_page_config(page_title="RAG Deep Research", page_icon="💬")

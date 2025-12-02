@@ -17,7 +17,17 @@ DATA_DIR = "data"
 DB_DIR = "chroma_db"
 
 load_dotenv()  # for local dev; on Streamlit Cloud use st.secrets
-mlflow.set_experiment("rag-deep-research")
+
+# --- Databricks MLflow config ---
+# Expecting env vars (recommended for Databricks):
+#   DATABRICKS_HOST, DATABRICKS_TOKEN, MLFLOW_TRACKING_URI, MLFLOW_EXPERIMENT_NAME
+tracking_uri = os.getenv("MLFLOW_TRACKING_URI") or os.getenv("DATABRICKS_HOST")
+experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "rag-deep-research")
+
+if tracking_uri:
+    mlflow.set_tracking_uri(tracking_uri)
+
+mlflow.set_experiment(experiment_name)
 
 st.set_page_config(page_title="RAG Deep Research", page_icon="💬")
 
@@ -68,6 +78,7 @@ def format_docs(docs):
 def get_llm():
     # On Streamlit Cloud, use st.secrets instead of os.getenv
     api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
+    # NOTE: keep model_name synced with what you log to MLflow below
     return ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=api_key)
 
 def build_chain():
@@ -125,6 +136,20 @@ if index_btn:
             try:
                 ingest.main()
                 st.cache_resource.clear()  # clear cached LLM if needed
+
+                # Optional: log a re-index event to MLflow
+                try:
+                    with mlflow.start_run(run_name="reindex", nested=True):
+                        mlflow.log_param("event_type", "reindex")
+                        mlflow.log_param("n_uploaded_files", len(uploaded_files))
+                        mlflow.log_param(
+                            "uploaded_filenames",
+                            ", ".join([f.name for f in uploaded_files])
+                        )
+                except Exception:
+                    # Don't break the app if logging fails
+                    pass
+
                 st.success("✅ Files uploaded and index rebuilt successfully!")
             except Exception as e:
                 st.error(f"❌ Error during ingestion: {e}")
@@ -135,9 +160,6 @@ st.markdown("---")
 
 
 #  Chat interface
-
-
-
 
 st.subheader("💬 Chat with your documents")
 
@@ -167,15 +189,32 @@ if clear_btn:
 
 if ask_btn and user_q.strip():
     st.session_state.history.append(("You", user_q))
+
+    # --- MLflow logging around the RAG call ---
+    start_time = time.time()
     try:
         rag_chain = build_chain()  # build using latest index
-        answer = rag_chain.invoke(user_q)
+
+        with mlflow.start_run(run_name="chat-query"):
+            # Params
+            mlflow.log_param("user_query", user_q)
+            mlflow.log_param("difficulty", difficulty)
+            mlflow.log_param("model_name", "gpt-4o-mini")
+
+            # Invoke RAG chain
+            answer = rag_chain.invoke(user_q)
+
+            # Metrics
+            latency = time.time() - start_time
+            mlflow.log_metric("latency_sec", latency)
+
+            # Artifact: answer text
+            mlflow.log_text(str(answer), "artifacts/answer.txt")
+
     except Exception as e:
         answer = f"⚠️ Error running RAG chain: {e}"
 
     st.session_state.history.append(("Bot", answer))
-
-
 
 for who, msg in st.session_state.history:
     if who == "You":

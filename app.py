@@ -1,6 +1,6 @@
 import os
-import streamlit as st
 import time
+import streamlit as st
 
 import ingest  # reuse existing ingest.main()
 import mlflow
@@ -12,18 +12,17 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-# ─── Config ──────────────────────────────────────────────────────────────
+# ─── Basic Config ────────────────────────────────────────────────────────
+st.set_page_config(page_title="RAG Deep Research", page_icon="💬")
+
 DATA_DIR = "data"
 DB_DIR = "chroma_db"
-# ─── Config ──────────────────────────────────────────────────────────────
-DATA_DIR = "data"
-DB_DIR = "chroma_db"
 
-load_dotenv()  # harmless for local dev
+load_dotenv()  # mainly for local dev, Streamlit Cloud uses st.secrets
 
-# --- Databricks MLflow config via Streamlit secrets only ---
+# ─── Databricks + MLflow Config ──────────────────────────────────────────
 
-# Required secrets
+# Required secrets for Databricks-backed MLflow
 DATABRICKS_HOST = st.secrets["DATABRICKS_HOST"]
 DATABRICKS_TOKEN = st.secrets["DATABRICKS_TOKEN"]
 
@@ -31,7 +30,7 @@ DATABRICKS_TOKEN = st.secrets["DATABRICKS_TOKEN"]
 MLFLOW_TRACKING_URI = st.secrets.get("MLFLOW_TRACKING_URI", "databricks")
 MLFLOW_EXPERIMENT_NAME = st.secrets.get("MLFLOW_EXPERIMENT_NAME", "rag-deep-research")
 
-# Make sure Databricks plugin sees these
+# Ensure MLflow / Databricks SDK see these in the environment
 os.environ["DATABRICKS_HOST"] = DATABRICKS_HOST
 os.environ["DATABRICKS_TOKEN"] = DATABRICKS_TOKEN
 
@@ -39,27 +38,35 @@ os.environ["DATABRICKS_TOKEN"] = DATABRICKS_TOKEN
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
 
-# Optional: debug in sidebar (no secrets)
-st.sidebar.markdown("### MLflow config (debug)")
-st.sidebar.write(f"Tracking URI: {mlflow.get_tracking_uri()}")
-st.sidebar.write(f"Experiment: {MLFLOW_EXPERIMENT_NAME}")
+# ─── Sidebar UI (static title, settings, debug) ──────────────────────────
 
-# UI #
+with st.sidebar:
+    st.title("RAG Deep Research 💬")
+    st.caption("Chat with your document-aware assistant.")
 
-st.set_page_config(page_title="RAG Deep Research", page_icon="💬")
+    st.markdown("---")
+    st.subheader("Question Settings")
 
-# Custom styling: light blue background, white chat bar
+    difficulty = st.selectbox(
+        "Difficulty of this question:",
+        ["easy", "medium", "hard"],
+        index=0,
+    )
+
+    if st.button("Clear chat"):
+        st.session_state.pop("messages", None)
+
+    st.markdown("---")
+    st.subheader("MLflow (debug)")
+    st.write(f"Tracking URI: {mlflow.get_tracking_uri()}")
+    st.write(f"Experiment: {MLFLOW_EXPERIMENT_NAME}")
+
+# ─── Custom Styling (background, minor tweaks) ───────────────────────────
+
 st.markdown("""
 <style>
 [data-testid="stAppViewContainer"] {
     background: linear-gradient(135deg, #d6ecff 0%, #f0f9ff 100%);
-}
-
-/* White chat bar */
-div[data-baseweb="input"] > div {
-    background-color: #ffffff !important;
-    border-radius: 10px !important;
-    border: 1px solid #cccccc !important;
 }
 button[kind="primary"] {
     border-radius: 10px !important;
@@ -68,11 +75,7 @@ button[kind="primary"] {
 </style>
 """, unsafe_allow_html=True)
 
-st.title("RAG Deep Research 💬")
-st.caption("Upload documents, build an index, and ask questions about them.")
-
-
-#  RAG chain helper
+# ─── RAG Chain Helper ────────────────────────────────────────────────────
 
 SYSTEM = """You are a precise research assistant.
 Use ONLY the provided context from the documents.
@@ -93,9 +96,8 @@ def format_docs(docs):
 
 @st.cache_resource(show_spinner=False)
 def get_llm():
-    # On Streamlit Cloud, use st.secrets instead of os.getenv
+    # On Streamlit Cloud, use st.secrets; locally, env vars are fine
     api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
-    # NOTE: keep model_name synced with what you log to MLflow below
     return ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=api_key)
 
 def build_chain():
@@ -119,9 +121,23 @@ def build_chain():
     )
     return rag_chain
 
-#  Document uploader + indexing
+# ─── Main: Chat + Upload / Re-index ──────────────────────────────────────
 
-st.subheader("📄 Upload documents")
+st.subheader("Chat with your documents")
+
+# Initialize chat history for the modern chat UI
+if "messages" not in st.session_state:
+    # messages: list of {"role": "user" | "assistant", "content": str}
+    st.session_state.messages = []
+
+# Render existing chat history
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# Upload & Re-index SECTION (below messages, above chat input)
+st.markdown("---")
+st.subheader("Upload & Re-index")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -131,14 +147,9 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
 )
 
-if uploaded_files:
-    st.write(f"{len(uploaded_files)} file(s) selected.")
-    for f in uploaded_files:
-        st.write("•", f.name)
+reindex_btn = st.button("Upload & Re-index", type="primary", key="reindex_main")
 
-index_btn = st.button("Upload & Re-index", type="primary")
-
-if index_btn:
+if reindex_btn:
     if not uploaded_files:
         st.warning("Please select at least one file to upload before re-indexing.")
     else:
@@ -154,7 +165,7 @@ if index_btn:
                 ingest.main()
                 st.cache_resource.clear()  # clear cached LLM if needed
 
-                # Optional: log a re-index event to MLflow
+                # Log re-index event to MLflow (optional)
                 try:
                     with mlflow.start_run(run_name="reindex", nested=True):
                         mlflow.log_param("event_type", "reindex")
@@ -173,43 +184,23 @@ if index_btn:
 
         st.info("You can now ask questions about the newly uploaded documents.")
 
-st.markdown("---")
-
-#  Chat interface (modern chat UI)
-
-st.subheader("💬 Chat with your documents")
-
-# Move difficulty to sidebar so the main area feels more like a chat app
-difficulty = st.sidebar.selectbox(
-    "Question difficulty:",
-    ["easy", "medium", "hard"],
-    index=0,
+st.markdown(
+    "<div style='font-size: 0.85rem; color: #555; margin-top: 0.5rem;'>"
+    "Ask a question about your indexed documents below."
+    "</div>",
+    unsafe_allow_html=True,
 )
 
-# Button to clear the whole conversation
-if st.sidebar.button("Clear chat"):
-    st.session_state.pop("messages", None)
-
-# Initialize chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Render existing chat history
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# Sticky input bar at the bottom of the page
-user_q = st.chat_input("Ask something about your documents...")
+# Sticky chat input at the bottom of the page
+user_q = st.chat_input("Type your question here...")
 
 if user_q:
-    # Show user message immediately
+    # 1. Add and display user message
     st.session_state.messages.append({"role": "user", "content": user_q})
-
     with st.chat_message("user"):
         st.markdown(user_q)
 
-    # --- MLflow logging around the RAG call ---
+    # 2. Run RAG chain + log to MLflow
     start_time = time.time()
     try:
         rag_chain = build_chain()  # build using latest index
@@ -233,8 +224,7 @@ if user_q:
     except Exception as e:
         answer = f"⚠️ Error running RAG chain: {e}"
 
-    # Add assistant message to history and display
+    # 3. Add and display assistant message
     st.session_state.messages.append({"role": "assistant", "content": answer})
-
     with st.chat_message("assistant"):
         st.markdown(answer)
